@@ -293,7 +293,7 @@
 
 <script>
 const GAS_URL = 'https://script.google.com/macros/s/AKfycby3sTA3Cs31QBCNJdqqVfASNKojC5Fd2NZ9SCaiqmrPa1M9S6afrt-xAbMChVdLDMA/exec';
-let state = { uid: '', reviewerName: '' };
+let state = { uid: '', reviewerName: '', isPresident: false, isSelfOnly: false, myAmId: '' };
 let adminDataCache = null;
 let giftDataCache = null;
 let modalPayload = {};
@@ -428,9 +428,16 @@ async function refreshData() {
             if (group) { groupEl.innerText = '所屬雁群：' + (group || '多重授權'); groupEl.style.display = 'inline'; } else { groupEl.style.display = 'none'; }
             dividerEl.style.display = (classroom && group) ? 'inline' : 'none';
 
-            document.getElementById('inv-select').innerHTML = d.participants.map(function(m) {
-                return '<option value="' + m.id + '">' + m.name + '</option>';
-            }).join('');
+            if (d.participants.length === 0 && d.isSelfOnly) {
+                // 自己還在審核中，無法推薦
+                document.getElementById('inv-select').innerHTML = '<option value="">⏳ 您的報名尚待確認，確認後才可提交推薦</option>';
+                const btnRef = document.getElementById('btn-ref');
+                if (btnRef) { btnRef.disabled = true; btnRef.style.opacity = '0.4'; }
+            } else {
+                document.getElementById('inv-select').innerHTML = d.participants.map(function(m) {
+                    return '<option value="' + m.id + '">' + m.name + '</option>';
+                }).join('');
+            }
 
             // 增加消費
             const groupedNewbies = d.newbies.reduce(function(acc, obj) {
@@ -440,8 +447,13 @@ async function refreshData() {
             }, {});
             let consHtml = '';
             Object.keys(groupedNewbies).forEach(function(gName) {
+                // isSelfOnly：只顯示自己推薦的新人
+                const visibleNewbies = state.isSelfOnly
+                    ? groupedNewbies[gName].filter(function(m) { return m.invId === state.myAmId; })
+                    : groupedNewbies[gName];
+                if (visibleNewbies.length === 0) return;
                 consHtml += '<div class="group-frame"><div class="group-header">' + gName + ' 雁群</div>';
-                groupedNewbies[gName].forEach(function(m) {
+                visibleNewbies.forEach(function(m) {
                     const isReached = m.isReached;
                     consHtml += '<div class="card" onclick="' + (isReached ? '' : "selectForCons('" + m.tarId + "','" + m.name + "','" + m.invId + "','" + m.invName + "')") + '" style="' + (isReached ? 'opacity:0.5;background:#F0F0F0;' : '') + '">';
                     consHtml += '<div><b>' + (m.name || '未知') + '</b> <small>(' + m.tarId + ')</small>';
@@ -487,17 +499,27 @@ async function refreshData() {
                 let influencersHtml = '';
                 let scoreBar = '';
                 if (perfData) {
-                    scoreBar = '<div class="group-score-bar">' +
-                        '<div class="group-score-item"><div class="group-score-num">' + perfData.groupTotalPoints + '</div><div class="group-score-label">總分</div></div>' +
-                        '<div class="group-score-item"><div class="group-score-num" style="color:#333;">' + perfData.groupTotalReferrals + '</div><div class="group-score-label">推薦人數</div></div>' +
-                        '<div class="group-score-item"><div class="group-score-num" style="color:#2E7D32;">' + perfData.groupEffectiveCount + '</div><div class="group-score-label">有效推薦</div></div>' +
-                    '</div>';
-                    influencersHtml = perfData.influencers.map(function(inv) {
-                        const recruitsHtml = Object.values(inv.recruits).map(function(r) {
-                            return '<div class="recruit-detail"><div style="display:flex;justify-content:space-between;"><span>推薦 <b>' + r.name + '</b></span><span class="tag ' + (r.points === 2 ? 'tag-green' : 'tag-plus1') + '">' + (r.points === 2 ? '有效推薦 +2' : '+1') + '</span></div><div style="font-size:11px;color:#999;margin-top:4px;">📅 登記: ' + r.recDate + (r.effDate ? ' | 🏆 達標: ' + r.effDate : ' (累計 $' + r.spent + ')') + '</div></div>';
+                    // isSelfOnly：只顯示自己的推薦戰報
+                    const visibleInfluencers = state.isSelfOnly
+                        ? perfData.influencers.filter(function(inv) { return inv.id === state.myAmId; })
+                        : perfData.influencers;
+
+                    if (visibleInfluencers.length > 0) {
+                        // isSelfOnly 不顯示整組積分條，只顯示自己的
+                        if (!state.isSelfOnly) {
+                            scoreBar = '<div class="group-score-bar">' +
+                                '<div class="group-score-item"><div class="group-score-num">' + perfData.groupTotalPoints + '</div><div class="group-score-label">總分</div></div>' +
+                                '<div class="group-score-item"><div class="group-score-num" style="color:#333;">' + perfData.groupTotalReferrals + '</div><div class="group-score-label">推薦人數</div></div>' +
+                                '<div class="group-score-item"><div class="group-score-num" style="color:#2E7D32;">' + perfData.groupEffectiveCount + '</div><div class="group-score-label">有效推薦</div></div>' +
+                            '</div>';
+                        }
+                        influencersHtml = visibleInfluencers.map(function(inv) {
+                            const recruitsHtml = Object.values(inv.recruits).map(function(r) {
+                                return '<div class="recruit-detail"><div style="display:flex;justify-content:space-between;"><span>推薦 <b>' + r.name + '</b></span><span class="tag ' + (r.points === 2 ? 'tag-green' : 'tag-plus1') + '">' + (r.points === 2 ? '有效推薦 +2' : '+1') + '</span></div><div style="font-size:11px;color:#999;margin-top:4px;">📅 登記: ' + r.recDate + (r.effDate ? ' | 🏆 達標: ' + r.effDate : ' (累計 $' + r.spent + ')') + '</div></div>';
+                            }).join('');
+                            return '<div class="perf-item"><div class="perf-title-row"><span style="font-weight:bold;font-size:16px;">' + inv.name + '</span><span style="font-size:13px;color:#666;">推薦:' + inv.count + ' | <b style="color:var(--accent)">總分:' + inv.totalPoints + '</b></span></div>' + recruitsHtml + '</div>';
                         }).join('');
-                        return '<div class="perf-item"><div class="perf-title-row"><span style="font-weight:bold;font-size:16px;">' + inv.name + '</span><span style="font-size:13px;color:#666;">推薦:' + inv.count + ' | <b style="color:var(--accent)">總分:' + inv.totalPoints + '</b></span></div>' + recruitsHtml + '</div>';
-                    }).join('');
+                    }
                 }
 
                 return '<div class="group-frame">' +
@@ -510,6 +532,9 @@ async function refreshData() {
 
             document.getElementById('group-perf-list').innerHTML = groupHtml || '<p style="text-align:center;color:#999;padding:30px;">目前無資料</p>';
 
+            state.isPresident = d.isPresident || false;
+            state.isSelfOnly = d.isSelfOnly || false;
+            state.myAmId = d.myProfile.id || '';
             if (d.isPresident) {
                 document.getElementById('t-adm').style.display = 'block';
                 state.reviewerName = d.myProfile.name || '會長';
@@ -537,6 +562,8 @@ async function handleIdentity(action) {
 }
 
 function switchTab(id) {
+    // 非會長不能進會長專區
+    if (id === 'adm' && !state.isPresident) { showToast('您沒有權限進入會長專區'); return; }
     document.querySelectorAll('.page').forEach(function(p) { p.style.display = 'none'; });
     const targetPage = document.getElementById(id);
     if (targetPage) targetPage.style.display = 'block';
@@ -1141,6 +1168,7 @@ window.onload = function() {
     const goToHash = function() {
         const hash = window.location.hash.replace('#', '');
         if (hash === 'register') { openRegisterPage(); return; }
+        if (hash === 'adm' && !state.isPresident) { window.location.hash = ''; return; }
         if (hash && ['ref', 'cons', 'group', 'adm'].includes(hash)) switchTab(hash);
     };
     if (isDev) {
